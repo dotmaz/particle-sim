@@ -66,6 +66,8 @@ void initGrid() {
 const int maxWoodAge = 20;
 const int maxTreeAge = 20;
 
+bool isPaused = false; // Tracks if the simulation is paused
+
 void applyPhysics() {
     // Copy current grid to nextGrid
     for (int x = 0; x < GRID_SIZE; x++) {
@@ -229,8 +231,14 @@ void motionFunction(int x, int y) {
 
 void keyboardFunction(unsigned char key, int x, int y) {
     // ... existing keyboard handling code ...
-
-    if (key == GLUT_KEY_RIGHT) {
+     if (key == 53) { // Assuming 53 is the ASCII code for numpad 5
+        isPaused = !isPaused;
+    }else if (key == '6') {
+        if(isPaused){
+                applyPhysics();
+                glutPostRedisplay();
+            }
+    }else if (key == GLUT_KEY_RIGHT) {
         currentElement = (currentElement + 1) % TYPE_SIZE; // Cycle to the next element
     } else if (key == GLUT_KEY_LEFT) {
         currentElement = (currentElement + TYPE_SIZE-1) % TYPE_SIZE; // Cycle to the previous element
@@ -313,7 +321,9 @@ void display() {
 
 
 void timer(int value) {
-    applyPhysics();
+    if (!isPaused) {
+        applyPhysics();
+    }
     glutPostRedisplay();
     glutTimerFunc(UPDATE_RATE, timer, 0);
 }
