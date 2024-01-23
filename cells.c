@@ -13,9 +13,9 @@
 // #define CELL_SIZE .02f
 #define UPDATE_RATE 15 // in milliseconds
 
-const int TYPE_SIZE = 6;
+const int TYPE_SIZE = 7;
 
-typedef enum { AIR, SAND, WATER, ROCK, WOOD, LEAF } CellType;
+typedef enum { AIR, SAND, WATER, ROCK, WOOD, LEAF, FIRE } CellType;
 typedef enum { SOLID, LIQUID, STATIC } CellMaterial;
 
 typedef struct {
@@ -23,6 +23,7 @@ typedef struct {
     CellMaterial material;
     int age;
     int treeAge;
+    float hueOffset;
 } Cell;
 
 typedef struct {
@@ -37,7 +38,8 @@ CellProperties cellProperties[] = {
     {1.0, true,  {0.0f, 0.0f, 1.0f}}, // Properties for WATER
     {2.5, false, {0.5f, 0.5f, 0.5f}},  // Properties for ROCK
     {2.5, false, {0.36f, 0.27f, 0.08f}}, // Properties for WOOD
-    {1.2, false, {0.168f, 0.51f, 0.165f}} // Properties for LEAF
+    {1.2, false, {0.168f, 0.51f, 0.165f}}, // Properties for LEAF
+    {0.5, false, {0.812f, 0.098f, 0.098f}} // Properties for FIRE
 };
 
 Cell grid[GRID_SIZE][GRID_SIZE];
@@ -56,9 +58,11 @@ void initGrid() {
             grid[x][y].type = AIR;
             grid[x][y].age = 0;
             grid[x][y].treeAge = 0;
+            grid[x][y].hueOffset = 0.0f;
             nextGrid[x][y].type = AIR;
             nextGrid[x][y].age = 0;
             nextGrid[x][y].treeAge = 0;
+            nextGrid[x][y].hueOffset = 0.0f;
         }
     }
 }
@@ -167,6 +171,27 @@ void applyPhysics() {
             }
         }
 
+        if(grid[x][y].type == FIRE){
+            if(grid[x][y].age < 20){
+                double randNum = ((double)rand() / (double)RAND_MAX);
+                for(int i = -1; i <= 1; i++){
+                    for(int j = -1; j <= 1; j++){
+                        if((!i && !j) || x+i < 0 || x+i > GRID_SIZE-1 || y+j < 0 || y+j > GRID_SIZE-1){continue;} // Ignore out of bounds
+                        if(nextGrid[x+i][y+j].type == ROCK || nextGrid[x+i][y+j].type == WATER || nextGrid[x+i][y+j].type == AIR) continue; // Only grow into empty space
+                        double randNum = ((double)rand() / (double)RAND_MAX);
+                        // This decides the speed at which leaves spread while they are alive
+                        if(randNum < .025){
+                            nextGrid[x+i][y+j].type = FIRE;
+                            nextGrid[x+i][y+j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .3f - .15f;
+                            nextGrid[x+i][y+j].age = 0;
+                        }
+                    }
+                }
+            }else if(grid[x][y].age > 25){
+                nextGrid[x][y].type = AIR;
+                nextGrid[x][y].hueOffset = 0.0f;
+            }
+        }
 
         // Incrememnt age for every cell
         nextGrid[x][y].age = nextGrid[x][y].age + 1;
@@ -297,7 +322,7 @@ void display() {
             float yBottom = (y * CELL_SIZE) - 1.0f;
 
             // Set color based on cell properties
-            glColor3f(cellProperties[type].color[0], cellProperties[type].color[1], cellProperties[type].color[2]);
+            glColor3f(cellProperties[type].color[0] + grid[x][y].hueOffset, cellProperties[type].color[1], cellProperties[type].color[2]);
 
             glBegin(GL_QUADS);
                 glVertex2f(xLeft, yBottom);
@@ -309,7 +334,7 @@ void display() {
     }
 
     glColor3f(1.0f, 1.0f, 1.0f); // White color for text
-    const char *elementNames[] = { "Air", "Sand", "Water", "Rock", "Wood", "Leaf" };
+    const char *elementNames[] = { "Air", "Sand", "Water", "Rock", "Wood", "Leaf", "Fire" };
     renderBitmapString(0.5f, 0.9f, GLUT_BITMAP_TIMES_ROMAN_24, elementNames[currentElement]);
 
     char strokeSizeText[50];
