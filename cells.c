@@ -2,38 +2,31 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+/* ---------------------------------------- Preprocessor Constants ---------------------------------------- */
+
+// Window resolution
 #define WINDOW_SIZE 800
-// #define
-// GRID_SIZE
-// 800
-// #define
-// CELL_SIZE
-// .0025f
-// #define
-// GRID_SIZE
-// 400
-// #define
-// CELL_SIZE
-// .005f
+
+// Square size of cell grid
 #define GRID_SIZE 200
 #define CELL_SIZE .01f
-// #define
-// GRID_SIZE
-// 100
-// #define
-// CELL_SIZE
-// .02f
-#define UPDATE_RATE 15 // in milliseconds
 
-const int TYPE_SIZE = 7;
+// Time between updates in milliseconds
+#define UPDATE_RATE 15
+
+/* ---------------------------------------- Enums ---------------------------------------- */
+
+// CellType - Type of cell used in decisions for next state (corresponds to user-interactable elements)
+// PlantDNAType - TEMPORARY - To store specific gene sequences
 
 typedef enum { AIR, SAND, WATER, ROCK, WOOD, LEAF, FIRE } CellType;
-typedef enum { SOLID, LIQUID, STATIC } CellMaterial;
 typedef enum { BASIC_PLANT, FAT_PLANT, MERGE_PLANT } PlantDNAType;
 
+/* ---------------------------------------- Data Structures ---------------------------------------- */
+
+// Cell defines the cell's main data structure
 typedef struct {
   CellType type;
-  CellMaterial material;
   int age;
   int treeAge;
   float hueOffset;
@@ -41,36 +34,16 @@ typedef struct {
   PlantDNAType plantDNAType;
 } Cell;
 
+// CellTypeProperties define attributes with values that vary for different types
 typedef struct {
-  // Wood growth & leaf birth parameters
-  double woodMaxAge;
-  double woodMaxTreeAge;
-  double woodGrowthUp;
-  double woodGrowthHorizontal;
-  double woodGrowthDown;
-  double woodLeafGrowth;
-  // Leaf growth parameters
-  double leafMaxAge;
-  double leadMaxTreeAge;
-  double leafGrowthRate;
-  // Leaf color
-  float color[3];
-} PlantDNA;
+  float density;  // UNUSED: TODO Implement density to allow denser cells to fall below less dense cells in applyPhysics()
+  bool isFluid;   // UNUSED: TODO Replace checks for water with checks for isFluid property when handling liquid physics in applyPhysics()
+  float color[3]; // Color of the cell type
+} CellTypeProperties;
 
-PlantDNA plantDNAs[] = {
-    {20, 20, .02, .005, .002, .001, 70, 5, .01, {0.168f, 0.51f, 0.165f}},   // Properties for BASIC PLANT
-    {100, 10, .01, .002, .002, .001, 100, 5, .02, {0.91F, 0.447F, 0.978f}}, // Properties for FAT PLANT
-    // {60, 15, .015, .0035, .002, .001, 85, 5, .015, {0.539f, 0.4785f, 0.5715f}} // MERGED
-};
-
-typedef struct {
-  float density;  // UNUSED
-  bool isFluid;   // UNUSED
-  float color[3]; // RGB color
-} CellProperties;
-
-CellProperties cellProperties[] = {
-    {0.0, false, {0.0f, 0.0f, 0.0f}},      // Properties for AIR (white or transparent)
+// List of CellTypeProperties corresponding to available cell types
+CellTypeProperties cellTypeProperties[] = {
+    {0.0, false, {0.0f, 0.0f, 0.0f}},      // Properties for AIR
     {1.6, false, {0.8f, 0.6f, 0.2f}},      // Properties for SAND
     {1.0, true, {0.0f, 0.0f, 1.0f}},       // Properties for WATER
     {2.5, false, {0.5f, 0.5f, 0.5f}},      // Properties for ROCK
@@ -79,50 +52,67 @@ CellProperties cellProperties[] = {
     {0.5, false, {0.812f, 0.098f, 0.098f}} // Properties for FIRE
 };
 
-Cell grid[GRID_SIZE][GRID_SIZE];
-Cell nextGrid[GRID_SIZE][GRID_SIZE];
+// PlantDNA defines the parameters that decide how plant growth is randomly generated
+typedef struct {
+  double woodMaxAge;           // Maximum age of wood cell before it stops spreading
+  double woodMaxTreeAge;       // Maximum age of wood cell's propogated plant age before the cell stops spreading
+  double woodGrowthUp;         // Probability for upward wood spread
+  double woodGrowthHorizontal; // Probability for horizontal wood spread
+  double woodGrowthDown;       // Probability for downward wood spread
+  double woodLeafGrowth;       // Probability for leaves to sprout from wood
+  double leafMaxAge;           // Maximum age of leaf cell before it stops spreading
+  double leadMaxTreeAge;       // Maximum age of leaf cell's propogated plant age before the cell stops spreading
+  double leafGrowthRate;       // Probability for leaf spread
+  float color[3];              // Leaf color (this overrides the cell's color derived from CellTypeProperties)
+} PlantDNA;
 
-CellType currentElement = WOOD; // Start with SAND as the current element
+// List of specific gene sequences (corresponds to PlantDNAType)
+PlantDNA plantDNAs[] = {
+    {20, 20, .02, .005, .002, .001, 70, 5, .01, {0.168f, 0.51f, 0.165f}},   // Properties for BASIC PLANT
+    {100, 10, .01, .002, .002, .001, 100, 5, .02, {0.91F, 0.447F, 0.978f}}, // Properties for FAT PLANT
+    // {60, 15, .015, .0035, .002, .001, 85, 5, .015, {0.539f, 0.4785f, 0.5715f}} // Properties for MERGE PLANT
+};
 
-int strokeSize = 0; // Default stroke size
-const int minStrokeSize = 0;
-const int maxStrokeSize = 20;
-bool maz = true;
+/* ---------------------------------------- Globals ---------------------------------------- */
 
+const int TYPE_SIZE = 7; // Total number of cell types
+
+Cell grid[GRID_SIZE][GRID_SIZE];     // Active cell grid
+Cell nextGrid[GRID_SIZE][GRID_SIZE]; /// Next state cell grid
+CellType currentElement = WOOD;      // Cell type to track current element
+
+// Placing cells with mouse
+int strokeSize = 0;           // Default stroke size
+const int minStrokeSize = 0;  // Minimum stroke size
+const int maxStrokeSize = 20; // Maximum stroke size
+
+// Rendering
+bool renderForward = true; // Oscillating boolean to decide the order in which cells are rendered
+bool isPaused = false;     // Tracks if the simulation is paused
+
+/* ---------------------------------------- Main Functions ---------------------------------------- */
+
+// Initalize grid to empty cells [Run once on setup & to reset]
 void initGrid() {
   for (int x = 0; x < GRID_SIZE; x++) {
     for (int y = 0; y < GRID_SIZE; y++) {
       grid[x][y].type = AIR;
-      //   grid[x][y].plantDNAType = BASIC_PLANT;
       grid[x][y].age = 0;
       grid[x][y].treeAge = 0;
       grid[x][y].hueOffset = 0.0f;
-      nextGrid[x][y].type = AIR;
-      //   nextGrid[x][y].plantDNAType = BASIC_PLANT;
-      nextGrid[x][y].age = 0;
-      nextGrid[x][y].treeAge = 0;
-      nextGrid[x][y].hueOffset = 0.0f;
     }
   }
 }
 
-bool isPaused = false; // Tracks if the simulation is paused
-
+// Apply updates to cells [Run every iteration]
 void applyPhysics() {
-  // Copy current grid to nextGrid
-  for (int x = 0; x < GRID_SIZE; x++) {
-    for (int y = 0; y < GRID_SIZE; y++) {
-      nextGrid[x][y] = grid[x][y];
-    }
-  }
-
   void performUpdates(int x, int y) {
-    if (grid[x][y].type == SAND || grid[x][y].type == WATER) {
+    if (grid[x][y].type == SAND || cellTypeProperties[grid[x][y].type].isFluid) {
       bool canMoveDown = y > 0 && nextGrid[x][y - 1].type == AIR;
       bool canMoveBottomRight = x < GRID_SIZE - 1 && y > 0 && nextGrid[x + 1][y - 1].type == AIR;
       bool canMoveBottomLeft = x > 0 && y > 0 && nextGrid[x - 1][y - 1].type == AIR;
-      bool canMoveRight = grid[x][y].type == WATER && x < GRID_SIZE - 1 && nextGrid[x + 1][y].type == AIR;
-      bool canMoveLeft = grid[x][y].type == WATER && x > 0 && nextGrid[x - 1][y].type == AIR;
+      bool canMoveRight = cellTypeProperties[grid[x][y].type].isFluid && x < GRID_SIZE - 1 && nextGrid[x + 1][y].type == AIR;
+      bool canMoveLeft = cellTypeProperties[grid[x][y].type].isFluid && x > 0 && nextGrid[x - 1][y].type == AIR;
 
       if (canMoveDown) {
         nextGrid[x][y].type = AIR;
@@ -202,14 +192,16 @@ void applyPhysics() {
       if (grid[x][y].age < leafMaxAge && grid[x][y].treeAge < leadMaxTreeAge) {
         for (int i = -1; i <= 1; i++) {
           for (int j = -1; j <= 1; j++) {
-            if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1) {
+            // Ignore out of bounds
+            if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1)
               continue;
-            } // Ignore out of bounds
+
+            // Only grow into empty space
             if (nextGrid[x + i][y + j].type != AIR)
-              continue; // Only grow into empty space
+              continue;
+
+            // Decide the speed at which leaves spread while they are alive
             double randNum = ((double)rand() / (double)RAND_MAX);
-            // This decides the speed at which leaves spread while they are
-            // alive
             if (randNum < leafGrowthRate) {
               nextGrid[x + i][y + j].type = LEAF;
               nextGrid[x + i][y + j].age = 0;
@@ -227,14 +219,16 @@ void applyPhysics() {
         double randNum = ((double)rand() / (double)RAND_MAX);
         for (int i = -1; i <= 1; i++) {
           for (int j = -1; j <= 1; j++) {
-            if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1) {
+            // Ignore out of bounds
+            if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1)
               continue;
-            } // Ignore out of bounds
-            if (nextGrid[x + i][y + j].type == ROCK || nextGrid[x + i][y + j].type == WATER || nextGrid[x + i][y + j].type == AIR)
-              continue; // Only grow into empty space
+
+            // Only spread into flammable cells
+            if (cellTypeProperties[nextGrid[x + i][y + j].type].isFluid || nextGrid[x + i][y + j].type == ROCK || nextGrid[x + i][y + j].type == AIR)
+              continue;
+
+            // Decide the speed at which fire spread while it's still alive
             double randNum = ((double)rand() / (double)RAND_MAX);
-            // This decides the speed at which leaves spread while they are
-            // alive
             if (randNum < .025) {
               nextGrid[x + i][y + j].type = FIRE;
               nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .3f - .15f;
@@ -252,7 +246,15 @@ void applyPhysics() {
     nextGrid[x][y].age = nextGrid[x][y].age + 1;
   }
 
-  if (maz) {
+  // Copy current state grid to new state grid
+  for (int x = 0; x < GRID_SIZE; x++) {
+    for (int y = 0; y < GRID_SIZE; y++) {
+      nextGrid[x][y] = grid[x][y];
+    }
+  }
+
+  // Perform updates on new state
+  if (renderForward) {
     for (int x = 0; x < GRID_SIZE; x++) {
       for (int y = 0; y < GRID_SIZE; y++) {
         performUpdates(x, y);
@@ -266,16 +268,28 @@ void applyPhysics() {
     }
   }
 
-  // Copy nextGrid to grid
+  // Copy new state grid to current state grid
   for (int x = 0; x < GRID_SIZE; x++) {
     for (int y = 0; y < GRID_SIZE; y++) {
       grid[x][y] = nextGrid[x][y];
     }
   }
 
-  maz = !maz;
+  renderForward = !renderForward;
 }
 
+/* ---------------------------------------- Helper Functions ---------------------------------------- */
+
+// Render a string on the screen
+void renderBitmapString(float x, float y, void *font, const char *string) {
+  const char *c;
+  glRasterPos2f(x, y);
+  for (c = string; *c != '\0'; c++) {
+    glutBitmapCharacter(font, *c);
+  }
+}
+
+// Place block of cells at a given position
 void placeBlock(int gridX, int gridY, CellType type, PlantDNAType plantDNAType) {
   for (int i = -strokeSize; i <= strokeSize; i++) {
     for (int j = -strokeSize; j <= strokeSize; j++) {
@@ -292,6 +306,8 @@ void placeBlock(int gridX, int gridY, CellType type, PlantDNAType plantDNAType) 
     }
   }
 }
+
+/* ---------------------------------------- Event Listener Callbacks ---------------------------------------- */
 
 void mouseFunction(int button, int state, int x, int y) {
   if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
@@ -350,16 +366,11 @@ void specialInput(int key, int x, int y) {
   }
 }
 
-void renderBitmapString(float x, float y, void *font, const char *string) {
-  const char *c;
-  glRasterPos2f(x, y);
-  for (c = string; *c != '\0'; c++) {
-    glutBitmapCharacter(font, *c);
-  }
-}
-
 void reshape(int width, int height) { glutReshapeWindow(WINDOW_SIZE, WINDOW_SIZE); }
 
+/* ---------------------------------------- Render Callbacks ---------------------------------------- */
+
+// Display callback (called within timer callback)
 void display() {
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -373,12 +384,11 @@ void display() {
 
       // Set color based on cell properties
       if (type == LEAF) {
-        glColor3f(plantDNAs[grid[x][y].plantDNAType].color[0] + grid[x][y].hueOffset,
-                  plantDNAs[grid[x][y].plantDNAType].color[1] + grid[x][y].hueOffset,
+        glColor3f(plantDNAs[grid[x][y].plantDNAType].color[0] + grid[x][y].hueOffset, plantDNAs[grid[x][y].plantDNAType].color[1] + grid[x][y].hueOffset,
                   plantDNAs[grid[x][y].plantDNAType].color[2] + grid[x][y].hueOffset);
       } else {
-        glColor3f(cellProperties[type].color[0] + grid[x][y].hueOffset, cellProperties[type].color[1] + grid[x][y].hueOffset,
-                  cellProperties[type].color[2] + grid[x][y].hueOffset);
+        glColor3f(cellTypeProperties[type].color[0] + grid[x][y].hueOffset, cellTypeProperties[type].color[1] + grid[x][y].hueOffset,
+                  cellTypeProperties[type].color[2] + grid[x][y].hueOffset);
       }
 
       glBegin(GL_QUADS);
@@ -402,6 +412,7 @@ void display() {
   glutSwapBuffers();
 }
 
+// Timer callback (run at UPDATE_RATE)
 void timer(int value) {
   if (!isPaused) {
     applyPhysics();
@@ -410,27 +421,34 @@ void timer(int value) {
   glutTimerFunc(UPDATE_RATE, timer, 0);
 }
 
+/* ---------------------------------------- Main Loop ---------------------------------------- */
+
 int main(int argc, char **argv) {
+  // Initialize GLUT and OpenGL
   glutInit(&argc, argv);
   glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
   glutInitWindowSize(WINDOW_SIZE, WINDOW_SIZE);
-  glutCreateWindow("Falling Sand Simulation");
-  initGrid();
-
-  glutDisplayFunc(display);
-  glutTimerFunc(UPDATE_RATE, timer, 0);
+  glutCreateWindow("Particools");
 
   glMatrixMode(GL_PROJECTION);
   gluOrtho2D(-1, 1, -1, 1);
   glMatrixMode(GL_MODELVIEW);
 
-  glutMouseFunc(mouseFunction);
-  glutMotionFunc(motionFunction);
-  glutKeyboardFunc(keyboardFunction);
-  glutSpecialFunc(specialInput);
+  // Attach event listener callbacks
+  glutMouseFunc(mouseFunction);       // On mouse click
+  glutMotionFunc(motionFunction);     // On mouse move while mouse is being clicked
+  glutKeyboardFunc(keyboardFunction); // On key press
+  glutSpecialFunc(specialInput);      // On special key press
+  glutReshapeFunc(reshape);           // On window reshape
 
-  glutReshapeFunc(reshape);
+  // Attach render callbacks
+  glutDisplayFunc(display);
+  glutTimerFunc(UPDATE_RATE, timer, 0);
 
+  // Initialize grid with cells
+  initGrid();
+
+  // Start the simulation
   glutMainLoop();
   return 0;
 }
