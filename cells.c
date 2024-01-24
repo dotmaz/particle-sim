@@ -45,6 +45,7 @@ typedef struct {
   Cell *topRight;
   Cell *bottomLeft;
   Cell *bottomRight;
+  Cell *all[8];
 } Neighborhood;
 
 // CellTypeProperties define attributes with values that vary for different types
@@ -167,6 +168,7 @@ void performCellUpdates(int x, int y) {
   Cell *nextCell = &nextGrid[x][y];
   CellTypeProperties cellProperties = cellTypeProperties[cell->type];
 
+  // Falling behavior
   if (cellProperties.hasGravity || cellProperties.isFluid) {
     if (neighbors.bottom->isValid && neighbors.bottom->type == AIR) {
       nextCell->type = AIR;
@@ -186,64 +188,63 @@ void performCellUpdates(int x, int y) {
     }
   }
 
-  if (grid[x][y].type == WOOD) {
+  // Wood growth behavior
+  if (cell->type == WOOD) {
 
-    const double woodMaxAge = plantDNAs[grid[x][y].plantDNAType].woodMaxAge;
-    const double woodMaxTreeAge = plantDNAs[grid[x][y].plantDNAType].woodMaxTreeAge;
-    const double woodGrowthUp = plantDNAs[grid[x][y].plantDNAType].woodGrowthUp;
-    const double woodGrowthHorizontal = plantDNAs[grid[x][y].plantDNAType].woodGrowthHorizontal;
-    const double woodGrowthDown = plantDNAs[grid[x][y].plantDNAType].woodGrowthDown;
-    const double woodLeafGrowth = plantDNAs[grid[x][y].plantDNAType].woodLeafGrowth;
+    const double woodMaxAge = plantDNAs[cell->plantDNAType].woodMaxAge;
+    const double woodMaxTreeAge = plantDNAs[cell->plantDNAType].woodMaxTreeAge;
+    const double woodGrowthUp = plantDNAs[cell->plantDNAType].woodGrowthUp;
+    const double woodGrowthHorizontal = plantDNAs[cell->plantDNAType].woodGrowthHorizontal;
+    const double woodGrowthDown = plantDNAs[cell->plantDNAType].woodGrowthDown;
+    const double woodLeafGrowth = plantDNAs[cell->plantDNAType].woodLeafGrowth;
 
-    if (grid[x][y].age < woodMaxAge && grid[x][y].treeAge < woodMaxTreeAge) {
-      for (int i = -1; i <= 1; i++) {
-        for (int j = -1; j <= 1; j++) {
-          if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1) {
-            continue;
-          } // Ignore out of bounds
-          if (nextGrid[x + i][y + j].type != AIR)
-            continue; // Only grow into empty space
-          double randNum = ((double)rand() / (double)RAND_MAX);
-          double randStat;
-          // Probability tree for upward bias
-          if (j == 1) {
-            randStat = woodGrowthUp;
-          } else if (j == 0) {
-            randStat = woodGrowthHorizontal;
-          } else {
-            randStat = woodGrowthDown;
-          }
-          if (randNum < randStat) {
+    if (cell->age < woodMaxAge && cell->treeAge < woodMaxTreeAge) {
+      for (int i = 0; i < 8; i++) {
+        if (!neighbors.all[i]->isValid)
+          continue;
+        if (neighbors.all[i]->type != AIR)
+          continue; // Only grow into empty space
+        double randNum = ((double)rand() / (double)RAND_MAX);
+        double randStat;
 
-            nextGrid[x + i][y + j].type = WOOD;
-            nextGrid[x + i][y + j].treeAge = grid[x + i][y + j].treeAge + 1;
-            nextGrid[x + i][y + j].age = 0;
-            nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
-            nextGrid[x + i][y + j].plantDNAType = grid[x][y].plantDNAType; // Propagate plant DNA type
-          }
+        // Probability tree for upward bias
+        if (i == 0 || i == 4 || i == 5) {
+          randStat = woodGrowthUp;
+        } else if (i == 2 || i == 3) {
+          randStat = woodGrowthHorizontal;
+        } else {
+          randStat = woodGrowthDown;
+        }
 
-          double leafRand = ((double)rand() / (double)RAND_MAX);
-          if (leafRand < woodLeafGrowth) {
-            nextGrid[x + i][y + j].type = LEAF;
-            nextGrid[x + i][y + j].treeAge = 0;
-            nextGrid[x + i][y + j].age = 0;
-            nextGrid[x + i][y + j].plantDNAType = grid[x][y].plantDNAType; // Propagate plant DNA type
-          }
+        if (randNum < randStat) {
+          neighbors.all[i]->type = WOOD;
+          neighbors.all[i]->treeAge = cell->treeAge + 1;
+          neighbors.all[i]->age = 0;
+          neighbors.all[i]->hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
+          neighbors.all[i]->plantDNAType = cell->plantDNAType; // Propagate plant DNA type
+        }
+
+        double leafRand = ((double)rand() / (double)RAND_MAX);
+        if (leafRand < woodLeafGrowth) {
+          neighbors.all[i]->type = LEAF;
+          neighbors.all[i]->treeAge = 0;
+          neighbors.all[i]->age = 0;
+          neighbors.all[i]->plantDNAType = cell->plantDNAType; // Propagate plant DNA type
         }
       }
     }
   }
 
-  if (grid[x][y].type == LEAF) {
+  if (cell->type == LEAF) {
 
-    const double leafMaxAge = plantDNAs[grid[x][y].plantDNAType].leafMaxAge;
-    const double leadMaxTreeAge = plantDNAs[grid[x][y].plantDNAType].leadMaxTreeAge;
-    const double leafGrowthRate = plantDNAs[grid[x][y].plantDNAType].leafGrowthRate;
+    const double leafMaxAge = plantDNAs[cell->plantDNAType].leafMaxAge;
+    const double leadMaxTreeAge = plantDNAs[cell->plantDNAType].leadMaxTreeAge;
+    const double leafGrowthRate = plantDNAs[cell->plantDNAType].leafGrowthRate;
 
     // First value decides how sparse the tree will be (max age before leaf
     // stops spreading) Second value decides how far the leaves can
     // potentially spread (max tree age before leaf stops spreading)
-    if (grid[x][y].age < leafMaxAge && grid[x][y].treeAge < leadMaxTreeAge) {
+    if (cell->age < leafMaxAge && cell->treeAge < leadMaxTreeAge) {
       for (int i = -1; i <= 1; i++) {
         for (int j = -1; j <= 1; j++) {
           // Ignore out of bounds
@@ -259,17 +260,17 @@ void performCellUpdates(int x, int y) {
           if (randNum < leafGrowthRate) {
             nextGrid[x + i][y + j].type = LEAF;
             nextGrid[x + i][y + j].age = 0;
-            nextGrid[x + i][y + j].treeAge = grid[x][y].treeAge + 1;
+            nextGrid[x + i][y + j].treeAge = cell->treeAge + 1;
             nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
-            nextGrid[x + i][y + j].plantDNAType = grid[x][y].plantDNAType; // Propagate plant DNA type
+            nextGrid[x + i][y + j].plantDNAType = cell->plantDNAType; // Propagate plant DNA type
           }
         }
       }
     }
   }
 
-  if (grid[x][y].type == FIRE) {
-    if (grid[x][y].age < 20) {
+  if (cell->type == FIRE) {
+    if (cell->age < 20) {
       double randNum = ((double)rand() / (double)RAND_MAX);
       for (int i = -1; i <= 1; i++) {
         for (int j = -1; j <= 1; j++) {
@@ -290,7 +291,7 @@ void performCellUpdates(int x, int y) {
           }
         }
       }
-    } else if (grid[x][y].age > 25) {
+    } else if (cell->age > 25) {
       nextCell->type = AIR;
       nextCell->hueOffset = 0.0f;
     }
@@ -360,6 +361,16 @@ Neighborhood getNeighbors(int x, int y) {
     neighborhood.bottomLeft = &nextGrid[x - 1][y - 1];
   if (x < GRID_SIZE - 1 && y > 0)
     neighborhood.bottomRight = &nextGrid[x + 1][y - 1];
+
+  // Initialize all neighbors attribute for ease of use
+  neighborhood.all[0] = neighborhood.top;
+  neighborhood.all[1] = neighborhood.bottom;
+  neighborhood.all[2] = neighborhood.left;
+  neighborhood.all[3] = neighborhood.right;
+  neighborhood.all[4] = neighborhood.topLeft;
+  neighborhood.all[5] = neighborhood.topRight;
+  neighborhood.all[6] = neighborhood.bottomLeft;
+  neighborhood.all[7] = neighborhood.bottomRight;
 
   return neighborhood;
 }
@@ -433,6 +444,7 @@ void display() {
   glClear(GL_COLOR_BUFFER_BIT);
   glLoadIdentity();
 
+  // Render grid of cells
   for (int x = 0; x < GRID_SIZE; x++) {
     for (int y = 0; y < GRID_SIZE; y++) {
       CellType type = grid[x][y].type;
@@ -457,6 +469,7 @@ void display() {
     }
   }
 
+  // Render UI elements
   glColor3f(1.0f, 1.0f,
             1.0f); // White color for text
   renderBitmapString(0.5f, 0.9f, GLUT_BITMAP_TIMES_ROMAN_24, cellTypeNames[currentElement]);
