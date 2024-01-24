@@ -201,7 +201,7 @@ void performCellUpdates(int x, int y) {
 
     if (cell->age < woodMaxAge && cell->treeAge < woodMaxTreeAge) {
       for (CardinalDirection direction = TOP; direction <= BOTTOMRIGHT; direction++) {
-        if (!neighbors.all[direction]->isValid)
+        if (neighbors.all[direction]->isValid != true)
           continue;
         if (neighbors.all[direction]->type != AIR)
           continue; // Only grow into empty space
@@ -273,6 +273,8 @@ void performCellUpdates(int x, int y) {
     if (cell->age < 20) {
       double randNum = ((double)rand() / (double)RAND_MAX);
       for (CardinalDirection direction = TOP; direction <= BOTTOMRIGHT; direction++) {
+        if (neighbors.all[direction]->isValid != true)
+          continue;
         // Only spread into flammable cells
         if (cellTypeProperties[neighbors.all[direction]->type].isFluid || neighbors.all[direction]->type == ROCK || neighbors.all[direction]->type == AIR)
           continue;
