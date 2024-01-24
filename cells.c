@@ -27,6 +27,7 @@ typedef enum { BASIC_PLANT, FAT_PLANT, MERGE_PLANT } PlantDNAType;
 // Cell defines the cell's main data structure
 typedef struct {
   CellType type;
+  bool isValid;
   int age;
   int treeAge;
   float hueOffset;
@@ -34,10 +35,22 @@ typedef struct {
   PlantDNAType plantDNAType;
 } Cell;
 
+// Neighborhood used to provide an easy to use API when performing updates
+typedef struct {
+  Cell *top;
+  Cell *bottom;
+  Cell *left;
+  Cell *right;
+  Cell *topLeft;
+  Cell *topRight;
+  Cell *bottomLeft;
+  Cell *bottomRight;
+} Neighborhood;
+
 // CellTypeProperties define attributes with values that vary for different types
 typedef struct {
-  float density;  // UNUSED: TODO Implement density to allow denser cells to fall below less dense cells in applyPhysics()
-  bool isFluid;   // UNUSED: TODO Replace checks for water with checks for isFluid property when handling liquid physics in applyPhysics()
+  float density;  // UNUSED: TODO Implement density to allow denser cells to fall below less dense cells in performCellUpdates()
+  bool isFluid;   // UNUSED: TODO Replace checks for water with checks for isFluid property when handling liquid physics in performCellUpdates()
   float color[3]; // Color of the cell type
 } CellTypeProperties;
 
@@ -80,6 +93,7 @@ const int TYPE_SIZE = 7; // Total number of cell types
 Cell grid[GRID_SIZE][GRID_SIZE];     // Active cell grid
 Cell nextGrid[GRID_SIZE][GRID_SIZE]; /// Next state cell grid
 CellType currentElement = WOOD;      // Cell type to track current element
+const char *cellTypeNames[] = {"Air", "Sand", "Water", "Rock", "Wood", "Leaf", "Fire"};
 
 // Placing cells with mouse
 int strokeSize = 0;           // Default stroke size
@@ -90,13 +104,19 @@ const int maxStrokeSize = 20; // Maximum stroke size
 bool renderForward = true; // Oscillating boolean to decide the order in which cells are rendered
 bool isPaused = false;     // Tracks if the simulation is paused
 
+/* ---------------------------------------- Function Headers ---------------------------------------- */
+
+void performCellUpdates(int x, int y);
+Neighborhood getNeighbors(int x, int y);
+
 /* ---------------------------------------- Main Functions ---------------------------------------- */
 
-// Initalize grid to empty cells [Run once on setup & to reset]
+// Initalize grid to empty cells
 void initGrid() {
   for (int x = 0; x < GRID_SIZE; x++) {
     for (int y = 0; y < GRID_SIZE; y++) {
       grid[x][y].type = AIR;
+      grid[x][y].isValid = true;
       grid[x][y].age = 0;
       grid[x][y].treeAge = 0;
       grid[x][y].hueOffset = 0.0f;
@@ -104,147 +124,8 @@ void initGrid() {
   }
 }
 
-// Apply updates to cells [Run every iteration]
-void applyPhysics() {
-  void performUpdates(int x, int y) {
-    if (grid[x][y].type == SAND || cellTypeProperties[grid[x][y].type].isFluid) {
-      bool canMoveDown = y > 0 && nextGrid[x][y - 1].type == AIR;
-      bool canMoveBottomRight = x < GRID_SIZE - 1 && y > 0 && nextGrid[x + 1][y - 1].type == AIR;
-      bool canMoveBottomLeft = x > 0 && y > 0 && nextGrid[x - 1][y - 1].type == AIR;
-      bool canMoveRight = cellTypeProperties[grid[x][y].type].isFluid && x < GRID_SIZE - 1 && nextGrid[x + 1][y].type == AIR;
-      bool canMoveLeft = cellTypeProperties[grid[x][y].type].isFluid && x > 0 && nextGrid[x - 1][y].type == AIR;
-
-      if (canMoveDown) {
-        nextGrid[x][y].type = AIR;
-        nextGrid[x][y - 1].type = grid[x][y].type;
-      } else if (canMoveBottomLeft) {
-        nextGrid[x][y].type = AIR;
-        nextGrid[x - 1][y - 1].type = grid[x][y].type;
-      } else if (canMoveBottomRight) {
-        nextGrid[x][y].type = AIR;
-        nextGrid[x + 1][y - 1].type = grid[x][y].type;
-      } else if (canMoveLeft) {
-        nextGrid[x][y].type = AIR;
-        nextGrid[x - 1][y].type = grid[x][y].type;
-      } else if (canMoveRight) {
-        nextGrid[x][y].type = AIR;
-        nextGrid[x + 1][y].type = grid[x][y].type;
-      }
-    }
-
-    if (grid[x][y].type == WOOD) {
-
-      const double woodMaxAge = plantDNAs[grid[x][y].plantDNAType].woodMaxAge;
-      const double woodMaxTreeAge = plantDNAs[grid[x][y].plantDNAType].woodMaxTreeAge;
-      const double woodGrowthUp = plantDNAs[grid[x][y].plantDNAType].woodGrowthUp;
-      const double woodGrowthHorizontal = plantDNAs[grid[x][y].plantDNAType].woodGrowthHorizontal;
-      const double woodGrowthDown = plantDNAs[grid[x][y].plantDNAType].woodGrowthDown;
-      const double woodLeafGrowth = plantDNAs[grid[x][y].plantDNAType].woodLeafGrowth;
-
-      if (grid[x][y].age < woodMaxAge && grid[x][y].treeAge < woodMaxTreeAge) {
-        for (int i = -1; i <= 1; i++) {
-          for (int j = -1; j <= 1; j++) {
-            if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1) {
-              continue;
-            } // Ignore out of bounds
-            if (nextGrid[x + i][y + j].type != AIR)
-              continue; // Only grow into empty space
-            double randNum = ((double)rand() / (double)RAND_MAX);
-            double randStat;
-            // Probability tree for upward bias
-            if (j == 1) {
-              randStat = woodGrowthUp;
-            } else if (j == 0) {
-              randStat = woodGrowthHorizontal;
-            } else {
-              randStat = woodGrowthDown;
-            }
-            if (randNum < randStat) {
-
-              nextGrid[x + i][y + j].type = WOOD;
-              nextGrid[x + i][y + j].treeAge = grid[x + i][y + j].treeAge + 1;
-              nextGrid[x + i][y + j].age = 0;
-              nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
-              nextGrid[x + i][y + j].plantDNAType = grid[x][y].plantDNAType; // Propagate plant DNA type
-            }
-
-            double leafRand = ((double)rand() / (double)RAND_MAX);
-            if (leafRand < woodLeafGrowth) {
-              nextGrid[x + i][y + j].type = LEAF;
-              nextGrid[x + i][y + j].treeAge = 0;
-              nextGrid[x + i][y + j].age = 0;
-              nextGrid[x + i][y + j].plantDNAType = grid[x][y].plantDNAType; // Propagate plant DNA type
-            }
-          }
-        }
-      }
-    }
-
-    if (grid[x][y].type == LEAF) {
-
-      const double leafMaxAge = plantDNAs[grid[x][y].plantDNAType].leafMaxAge;
-      const double leadMaxTreeAge = plantDNAs[grid[x][y].plantDNAType].leadMaxTreeAge;
-      const double leafGrowthRate = plantDNAs[grid[x][y].plantDNAType].leafGrowthRate;
-
-      // First value decides how sparse the tree will be (max age before leaf
-      // stops spreading) Second value decides how far the leaves can
-      // potentially spread (max tree age before leaf stops spreading)
-      if (grid[x][y].age < leafMaxAge && grid[x][y].treeAge < leadMaxTreeAge) {
-        for (int i = -1; i <= 1; i++) {
-          for (int j = -1; j <= 1; j++) {
-            // Ignore out of bounds
-            if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1)
-              continue;
-
-            // Only grow into empty space
-            if (nextGrid[x + i][y + j].type != AIR)
-              continue;
-
-            // Decide the speed at which leaves spread while they are alive
-            double randNum = ((double)rand() / (double)RAND_MAX);
-            if (randNum < leafGrowthRate) {
-              nextGrid[x + i][y + j].type = LEAF;
-              nextGrid[x + i][y + j].age = 0;
-              nextGrid[x + i][y + j].treeAge = grid[x][y].treeAge + 1;
-              nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
-              nextGrid[x + i][y + j].plantDNAType = grid[x][y].plantDNAType; // Propagate plant DNA type
-            }
-          }
-        }
-      }
-    }
-
-    if (grid[x][y].type == FIRE) {
-      if (grid[x][y].age < 20) {
-        double randNum = ((double)rand() / (double)RAND_MAX);
-        for (int i = -1; i <= 1; i++) {
-          for (int j = -1; j <= 1; j++) {
-            // Ignore out of bounds
-            if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1)
-              continue;
-
-            // Only spread into flammable cells
-            if (cellTypeProperties[nextGrid[x + i][y + j].type].isFluid || nextGrid[x + i][y + j].type == ROCK || nextGrid[x + i][y + j].type == AIR)
-              continue;
-
-            // Decide the speed at which fire spread while it's still alive
-            double randNum = ((double)rand() / (double)RAND_MAX);
-            if (randNum < .025) {
-              nextGrid[x + i][y + j].type = FIRE;
-              nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .3f - .15f;
-              nextGrid[x + i][y + j].age = 0;
-            }
-          }
-        }
-      } else if (grid[x][y].age > 25) {
-        nextGrid[x][y].type = AIR;
-        nextGrid[x][y].hueOffset = 0.0f;
-      }
-    }
-
-    // Incrememnt age for every cell
-    nextGrid[x][y].age = nextGrid[x][y].age + 1;
-  }
+// Perform updates to all cells
+void performGridUpdates() {
 
   // Copy current state grid to new state grid
   for (int x = 0; x < GRID_SIZE; x++) {
@@ -257,13 +138,13 @@ void applyPhysics() {
   if (renderForward) {
     for (int x = 0; x < GRID_SIZE; x++) {
       for (int y = 0; y < GRID_SIZE; y++) {
-        performUpdates(x, y);
+        performCellUpdates(x, y);
       }
     }
   } else {
     for (int x = GRID_SIZE - 1; x >= 0; x--) {
       for (int y = 0; y < GRID_SIZE; y++) {
-        performUpdates(x, y);
+        performCellUpdates(x, y);
       }
     }
   }
@@ -276,6 +157,160 @@ void applyPhysics() {
   }
 
   renderForward = !renderForward;
+}
+
+// Perform updates on a particular cell given it's coordinates
+void performCellUpdates(int x, int y) {
+  Neighborhood neighbors = getNeighbors(x, y);
+  Cell *cell = &grid[x][y];
+  Cell *nextCell = &nextGrid[x][y];
+
+  // if (neighbors.bottom.isValid == false || neighbors.left.isValid == false) {
+  //   printf("%i %i\n", x, y);
+  // }
+
+  if (cell->type == SAND || cellTypeProperties[cell->type].isFluid) {
+    // bool canMoveDown = y > 0 && nextGrid[x][y - 1].type == AIR;
+    bool canMoveBottomRight = x < GRID_SIZE - 1 && y > 0 && nextGrid[x + 1][y - 1].type == AIR;
+    bool canMoveBottomLeft = x > 0 && y > 0 && nextGrid[x - 1][y - 1].type == AIR;
+    bool canMoveRight = cellTypeProperties[cell->type].isFluid && x < GRID_SIZE - 1 && nextGrid[x + 1][y].type == AIR;
+    bool canMoveLeft = cellTypeProperties[cell->type].isFluid && x > 0 && nextGrid[x - 1][y].type == AIR;
+
+    // if (canMoveDown) {
+    //   nextGrid[x][y].type = AIR;
+    //   nextGrid[x][y - 1].type = grid[x][y].type;
+    // }
+
+    if (neighbors.bottom->isValid && neighbors.bottom->type == AIR) {
+      nextCell->type = AIR;
+      neighbors.bottom->type = cell->type;
+    } else if (canMoveBottomLeft) {
+      nextGrid[x][y].type = AIR;
+      nextGrid[x - 1][y - 1].type = grid[x][y].type;
+    } else if (canMoveBottomRight) {
+      nextGrid[x][y].type = AIR;
+      nextGrid[x + 1][y - 1].type = grid[x][y].type;
+    } else if (canMoveLeft) {
+      nextGrid[x][y].type = AIR;
+      nextGrid[x - 1][y].type = grid[x][y].type;
+    } else if (canMoveRight) {
+      nextGrid[x][y].type = AIR;
+      nextGrid[x + 1][y].type = grid[x][y].type;
+    }
+  }
+
+  if (grid[x][y].type == WOOD) {
+
+    const double woodMaxAge = plantDNAs[grid[x][y].plantDNAType].woodMaxAge;
+    const double woodMaxTreeAge = plantDNAs[grid[x][y].plantDNAType].woodMaxTreeAge;
+    const double woodGrowthUp = plantDNAs[grid[x][y].plantDNAType].woodGrowthUp;
+    const double woodGrowthHorizontal = plantDNAs[grid[x][y].plantDNAType].woodGrowthHorizontal;
+    const double woodGrowthDown = plantDNAs[grid[x][y].plantDNAType].woodGrowthDown;
+    const double woodLeafGrowth = plantDNAs[grid[x][y].plantDNAType].woodLeafGrowth;
+
+    if (grid[x][y].age < woodMaxAge && grid[x][y].treeAge < woodMaxTreeAge) {
+      for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+          if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1) {
+            continue;
+          } // Ignore out of bounds
+          if (nextGrid[x + i][y + j].type != AIR)
+            continue; // Only grow into empty space
+          double randNum = ((double)rand() / (double)RAND_MAX);
+          double randStat;
+          // Probability tree for upward bias
+          if (j == 1) {
+            randStat = woodGrowthUp;
+          } else if (j == 0) {
+            randStat = woodGrowthHorizontal;
+          } else {
+            randStat = woodGrowthDown;
+          }
+          if (randNum < randStat) {
+
+            nextGrid[x + i][y + j].type = WOOD;
+            nextGrid[x + i][y + j].treeAge = grid[x + i][y + j].treeAge + 1;
+            nextGrid[x + i][y + j].age = 0;
+            nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
+            nextGrid[x + i][y + j].plantDNAType = grid[x][y].plantDNAType; // Propagate plant DNA type
+          }
+
+          double leafRand = ((double)rand() / (double)RAND_MAX);
+          if (leafRand < woodLeafGrowth) {
+            nextGrid[x + i][y + j].type = LEAF;
+            nextGrid[x + i][y + j].treeAge = 0;
+            nextGrid[x + i][y + j].age = 0;
+            nextGrid[x + i][y + j].plantDNAType = grid[x][y].plantDNAType; // Propagate plant DNA type
+          }
+        }
+      }
+    }
+  }
+
+  if (grid[x][y].type == LEAF) {
+
+    const double leafMaxAge = plantDNAs[grid[x][y].plantDNAType].leafMaxAge;
+    const double leadMaxTreeAge = plantDNAs[grid[x][y].plantDNAType].leadMaxTreeAge;
+    const double leafGrowthRate = plantDNAs[grid[x][y].plantDNAType].leafGrowthRate;
+
+    // First value decides how sparse the tree will be (max age before leaf
+    // stops spreading) Second value decides how far the leaves can
+    // potentially spread (max tree age before leaf stops spreading)
+    if (grid[x][y].age < leafMaxAge && grid[x][y].treeAge < leadMaxTreeAge) {
+      for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+          // Ignore out of bounds
+          if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1)
+            continue;
+
+          // Only grow into empty space
+          if (nextGrid[x + i][y + j].type != AIR)
+            continue;
+
+          // Decide the speed at which leaves spread while they are alive
+          double randNum = ((double)rand() / (double)RAND_MAX);
+          if (randNum < leafGrowthRate) {
+            nextGrid[x + i][y + j].type = LEAF;
+            nextGrid[x + i][y + j].age = 0;
+            nextGrid[x + i][y + j].treeAge = grid[x][y].treeAge + 1;
+            nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
+            nextGrid[x + i][y + j].plantDNAType = grid[x][y].plantDNAType; // Propagate plant DNA type
+          }
+        }
+      }
+    }
+  }
+
+  if (grid[x][y].type == FIRE) {
+    if (grid[x][y].age < 20) {
+      double randNum = ((double)rand() / (double)RAND_MAX);
+      for (int i = -1; i <= 1; i++) {
+        for (int j = -1; j <= 1; j++) {
+          // Ignore out of bounds
+          if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1)
+            continue;
+
+          // Only spread into flammable cells
+          if (cellTypeProperties[nextGrid[x + i][y + j].type].isFluid || nextGrid[x + i][y + j].type == ROCK || nextGrid[x + i][y + j].type == AIR)
+            continue;
+
+          // Decide the speed at which fire spread while it's still alive
+          double randNum = ((double)rand() / (double)RAND_MAX);
+          if (randNum < .025) {
+            nextGrid[x + i][y + j].type = FIRE;
+            nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .3f - .15f;
+            nextGrid[x + i][y + j].age = 0;
+          }
+        }
+      }
+    } else if (grid[x][y].age > 25) {
+      nextGrid[x][y].type = AIR;
+      nextGrid[x][y].hueOffset = 0.0f;
+    }
+  }
+
+  // Incrememnt age for every cell
+  nextGrid[x][y].age = nextGrid[x][y].age + 1;
 }
 
 /* ---------------------------------------- Helper Functions ---------------------------------------- */
@@ -305,6 +340,41 @@ void placeBlock(int gridX, int gridY, CellType type, PlantDNAType plantDNAType) 
       }
     }
   }
+}
+
+Neighborhood getNeighbors(int x, int y) {
+  Neighborhood neighborhood;
+
+  // Initialize all neighbors to default value
+  Cell defaultCell = {0, false};
+  neighborhood.top = &defaultCell;
+  neighborhood.bottom = &defaultCell;
+  neighborhood.left = &defaultCell;
+  neighborhood.right = &defaultCell;
+  neighborhood.topLeft = &defaultCell;
+  neighborhood.topRight = &defaultCell;
+  neighborhood.bottomLeft = &defaultCell;
+  neighborhood.bottomRight = &defaultCell;
+
+  // Check and assign neighbors, ensuring we don't go out of bounds
+  if (y < GRID_SIZE - 1)
+    neighborhood.top = &nextGrid[x][y + 1];
+  if (y > 0)
+    neighborhood.bottom = &nextGrid[x][y - 1];
+  if (x > 0)
+    neighborhood.left = &nextGrid[x - 1][y];
+  if (x < GRID_SIZE - 1)
+    neighborhood.right = &nextGrid[x + 1][y];
+  if (x > 0 && y < GRID_SIZE - 1)
+    neighborhood.topLeft = &nextGrid[x - 1][y + 1];
+  if (x < GRID_SIZE - 1 && y < GRID_SIZE - 1)
+    neighborhood.topRight = &nextGrid[x + 1][y + 1];
+  if (x > 0 && y > 0)
+    neighborhood.bottomLeft = &nextGrid[x - 1][y - 1];
+  if (x < GRID_SIZE - 1 && y > 0)
+    neighborhood.bottomRight = &nextGrid[x + 1][y - 1];
+
+  return neighborhood;
 }
 
 /* ---------------------------------------- Event Listener Callbacks ---------------------------------------- */
@@ -337,7 +407,7 @@ void keyboardFunction(unsigned char key, int x, int y) {
     isPaused = !isPaused;
   } else if (key == '6') {
     if (isPaused) {
-      applyPhysics();
+      performGridUpdates();
       glutPostRedisplay();
     }
   } else if (key == GLUT_KEY_RIGHT) {
@@ -370,7 +440,7 @@ void reshape(int width, int height) { glutReshapeWindow(WINDOW_SIZE, WINDOW_SIZE
 
 /* ---------------------------------------- Render Callbacks ---------------------------------------- */
 
-// Display callback (called within timer callback)
+// Display callback to render the grid of cells and UI elements
 void display() {
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -402,8 +472,7 @@ void display() {
 
   glColor3f(1.0f, 1.0f,
             1.0f); // White color for text
-  const char *elementNames[] = {"Air", "Sand", "Water", "Rock", "Wood", "Leaf", "Fire"};
-  renderBitmapString(0.5f, 0.9f, GLUT_BITMAP_TIMES_ROMAN_24, elementNames[currentElement]);
+  renderBitmapString(0.5f, 0.9f, GLUT_BITMAP_TIMES_ROMAN_24, cellTypeNames[currentElement]);
 
   char strokeSizeText[50];
   sprintf(strokeSizeText, "Stroke Size: %d", strokeSize);
@@ -415,7 +484,7 @@ void display() {
 // Timer callback (run at UPDATE_RATE)
 void timer(int value) {
   if (!isPaused) {
-    applyPhysics();
+    performGridUpdates();
   }
   glutPostRedisplay();
   glutTimerFunc(UPDATE_RATE, timer, 0);
