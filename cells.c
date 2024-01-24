@@ -236,6 +236,7 @@ void performCellUpdates(int x, int y) {
     }
   }
 
+  // Leaf growth behavior
   if (cell->type == LEAF) {
 
     const double leafMaxAge = plantDNAs[cell->plantDNAType].leafMaxAge;
@@ -246,50 +247,42 @@ void performCellUpdates(int x, int y) {
     // stops spreading) Second value decides how far the leaves can
     // potentially spread (max tree age before leaf stops spreading)
     if (cell->age < leafMaxAge && cell->treeAge < leadMaxTreeAge) {
-      for (int i = -1; i <= 1; i++) {
-        for (int j = -1; j <= 1; j++) {
-          // Ignore out of bounds
-          if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1)
-            continue;
+      for (CardinalDirection direction = TOP; direction <= BOTTOMRIGHT; direction++) {
+        if (neighbors.all[direction]->isValid != true)
+          continue;
 
-          // Only grow into empty space
-          if (nextGrid[x + i][y + j].type != AIR)
-            continue;
+        // Only grow into empty space
+        if (neighbors.all[direction]->type != AIR)
+          continue;
 
-          // Decide the speed at which leaves spread while they are alive
-          double randNum = ((double)rand() / (double)RAND_MAX);
-          if (randNum < leafGrowthRate) {
-            nextGrid[x + i][y + j].type = LEAF;
-            nextGrid[x + i][y + j].age = 0;
-            nextGrid[x + i][y + j].treeAge = cell->treeAge + 1;
-            nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
-            nextGrid[x + i][y + j].plantDNAType = cell->plantDNAType; // Propagate plant DNA type
-          }
+        // Decide the speed at which leaves spread while they are alive
+        double randNum = ((double)rand() / (double)RAND_MAX);
+        if (randNum < leafGrowthRate) {
+          neighbors.all[direction]->type = LEAF;
+          neighbors.all[direction]->age = 0;
+          neighbors.all[direction]->treeAge = cell->treeAge + 1;
+          neighbors.all[direction]->hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
+          neighbors.all[direction]->plantDNAType = cell->plantDNAType; // Propagate plant DNA type
         }
       }
     }
   }
 
+  // Fire spreading behavior
   if (cell->type == FIRE) {
     if (cell->age < 20) {
       double randNum = ((double)rand() / (double)RAND_MAX);
-      for (int i = -1; i <= 1; i++) {
-        for (int j = -1; j <= 1; j++) {
-          // Ignore out of bounds
-          if ((!i && !j) || x + i < 0 || x + i > GRID_SIZE - 1 || y + j < 0 || y + j > GRID_SIZE - 1)
-            continue;
+      for (CardinalDirection direction = TOP; direction <= BOTTOMRIGHT; direction++) {
+        // Only spread into flammable cells
+        if (cellTypeProperties[neighbors.all[direction]->type].isFluid || neighbors.all[direction]->type == ROCK || neighbors.all[direction]->type == AIR)
+          continue;
 
-          // Only spread into flammable cells
-          if (cellTypeProperties[nextGrid[x + i][y + j].type].isFluid || nextGrid[x + i][y + j].type == ROCK || nextGrid[x + i][y + j].type == AIR)
-            continue;
-
-          // Decide the speed at which fire spread while it's still alive
-          double randNum = ((double)rand() / (double)RAND_MAX);
-          if (randNum < .025) {
-            nextGrid[x + i][y + j].type = FIRE;
-            nextGrid[x + i][y + j].hueOffset = (float)((double)rand() / (double)RAND_MAX) * .3f - .15f;
-            nextGrid[x + i][y + j].age = 0;
-          }
+        // Decide the speed at which fire spread while it's still alive
+        double randNum = ((double)rand() / (double)RAND_MAX);
+        if (randNum < .02) {
+          neighbors.all[direction]->type = FIRE;
+          neighbors.all[direction]->hueOffset = (float)((double)rand() / (double)RAND_MAX) * .3f - .15f;
+          neighbors.all[direction]->age = 0;
         }
       }
     } else if (cell->age > 25) {
