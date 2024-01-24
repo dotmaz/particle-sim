@@ -19,6 +19,7 @@
 // CellType - Type of cell used in decisions for next state (corresponds to user-interactable elements)
 // PlantDNAType - TEMPORARY - To store specific gene sequences
 
+typedef enum { TOP, BOTTOM, LEFT, RIGHT, TOPLEFT, TOPRIGHT, BOTTOMLEFT, BOTTOMRIGHT } CardinalDirection;
 typedef enum { AIR, SAND, WATER, ROCK, WOOD, LEAF, FIRE } CellType;
 typedef enum { BASIC_PLANT, FAT_PLANT, MERGE_PLANT } PlantDNAType;
 
@@ -199,37 +200,37 @@ void performCellUpdates(int x, int y) {
     const double woodLeafGrowth = plantDNAs[cell->plantDNAType].woodLeafGrowth;
 
     if (cell->age < woodMaxAge && cell->treeAge < woodMaxTreeAge) {
-      for (int i = 0; i < 8; i++) {
-        if (!neighbors.all[i]->isValid)
+      for (CardinalDirection direction = TOP; direction <= BOTTOMRIGHT; direction++) {
+        if (!neighbors.all[direction]->isValid)
           continue;
-        if (neighbors.all[i]->type != AIR)
+        if (neighbors.all[direction]->type != AIR)
           continue; // Only grow into empty space
         double randNum = ((double)rand() / (double)RAND_MAX);
         double randStat;
 
         // Probability tree for upward bias
-        if (i == 0 || i == 4 || i == 5) {
+        if (direction == TOP || direction == TOPLEFT || direction == TOPRIGHT) {
           randStat = woodGrowthUp;
-        } else if (i == 2 || i == 3) {
+        } else if (direction == LEFT || direction == RIGHT) {
           randStat = woodGrowthHorizontal;
         } else {
           randStat = woodGrowthDown;
         }
 
         if (randNum < randStat) {
-          neighbors.all[i]->type = WOOD;
-          neighbors.all[i]->treeAge = cell->treeAge + 1;
-          neighbors.all[i]->age = 0;
-          neighbors.all[i]->hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
-          neighbors.all[i]->plantDNAType = cell->plantDNAType; // Propagate plant DNA type
+          neighbors.all[direction]->type = WOOD;
+          neighbors.all[direction]->treeAge = cell->treeAge + 1;
+          neighbors.all[direction]->age = 0;
+          neighbors.all[direction]->hueOffset = (float)((double)rand() / (double)RAND_MAX) * .2f - .1f;
+          neighbors.all[direction]->plantDNAType = cell->plantDNAType; // Propagate plant DNA type
         }
 
         double leafRand = ((double)rand() / (double)RAND_MAX);
         if (leafRand < woodLeafGrowth) {
-          neighbors.all[i]->type = LEAF;
-          neighbors.all[i]->treeAge = 0;
-          neighbors.all[i]->age = 0;
-          neighbors.all[i]->plantDNAType = cell->plantDNAType; // Propagate plant DNA type
+          neighbors.all[direction]->type = LEAF;
+          neighbors.all[direction]->treeAge = 0;
+          neighbors.all[direction]->age = 0;
+          neighbors.all[direction]->plantDNAType = cell->plantDNAType; // Propagate plant DNA type
         }
       }
     }
