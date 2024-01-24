@@ -49,20 +49,21 @@ typedef struct {
 
 // CellTypeProperties define attributes with values that vary for different types
 typedef struct {
-  float density;  // UNUSED: TODO Implement density to allow denser cells to fall below less dense cells in performCellUpdates()
-  bool isFluid;   // UNUSED: TODO Replace checks for water with checks for isFluid property when handling liquid physics in performCellUpdates()
-  float color[3]; // Color of the cell type
+  float density;   // UNUSED: TODO Implement density to allow denser cells to fall below less dense cells in performCellUpdates()
+  bool hasGravity; // Decides whether a cell adheres to gravity
+  bool isFluid;    // Decides whether cells will look left and right for empty space to move
+  float color[3];  // Color of the cell type
 } CellTypeProperties;
 
 // List of CellTypeProperties corresponding to available cell types
 CellTypeProperties cellTypeProperties[] = {
-    {0.0, false, {0.0f, 0.0f, 0.0f}},      // Properties for AIR
-    {1.6, false, {0.8f, 0.6f, 0.2f}},      // Properties for SAND
-    {1.0, true, {0.0f, 0.0f, 1.0f}},       // Properties for WATER
-    {2.5, false, {0.5f, 0.5f, 0.5f}},      // Properties for ROCK
-    {2.5, false, {0.36f, 0.27f, 0.08f}},   // Properties for WOOD
-    {1.2, false, {0.0f, 0.0f, 0.0f}},      // Properties for LEAF
-    {0.5, false, {0.812f, 0.098f, 0.098f}} // Properties for FIRE
+    {0.0, false, false, {0.0f, 0.0f, 0.0f}},      // Properties for AIR
+    {1.6, true, false, {0.8f, 0.6f, 0.2f}},       // Properties for SAND
+    {1.0, true, true, {0.0f, 0.0f, 1.0f}},        // Properties for WATER
+    {2.5, false, false, {0.5f, 0.5f, 0.5f}},      // Properties for ROCK
+    {2.5, false, false, {0.36f, 0.27f, 0.08f}},   // Properties for WOOD
+    {1.2, false, false, {0.0f, 0.0f, 0.0f}},      // Properties for LEAF
+    {0.5, false, false, {0.812f, 0.098f, 0.098f}} // Properties for FIRE
 };
 
 // PlantDNA defines the parameters that decide how plant growth is randomly generated
@@ -101,7 +102,7 @@ const int minStrokeSize = 0;  // Minimum stroke size
 const int maxStrokeSize = 20; // Maximum stroke size
 
 // Rendering
-bool renderForward = true; // Oscillating boolean to decide the order in which cells are rendered
+bool renderForward = true; // Oscillating boolean to decide the order in which cells are rendered [Currently not in use; causes water to not flow properly]
 bool isPaused = false;     // Tracks if the simulation is paused
 
 /* ---------------------------------------- Function Headers ---------------------------------------- */
@@ -156,7 +157,7 @@ void performGridUpdates() {
     }
   }
 
-  renderForward = !renderForward;
+  // renderForward = !renderForward;
 }
 
 // Perform updates on a particular cell given it's coordinates
@@ -164,38 +165,24 @@ void performCellUpdates(int x, int y) {
   Neighborhood neighbors = getNeighbors(x, y);
   Cell *cell = &grid[x][y];
   Cell *nextCell = &nextGrid[x][y];
+  CellTypeProperties cellProperties = cellTypeProperties[cell->type];
 
-  // if (neighbors.bottom.isValid == false || neighbors.left.isValid == false) {
-  //   printf("%i %i\n", x, y);
-  // }
-
-  if (cell->type == SAND || cellTypeProperties[cell->type].isFluid) {
-    // bool canMoveDown = y > 0 && nextGrid[x][y - 1].type == AIR;
-    bool canMoveBottomRight = x < GRID_SIZE - 1 && y > 0 && nextGrid[x + 1][y - 1].type == AIR;
-    bool canMoveBottomLeft = x > 0 && y > 0 && nextGrid[x - 1][y - 1].type == AIR;
-    bool canMoveRight = cellTypeProperties[cell->type].isFluid && x < GRID_SIZE - 1 && nextGrid[x + 1][y].type == AIR;
-    bool canMoveLeft = cellTypeProperties[cell->type].isFluid && x > 0 && nextGrid[x - 1][y].type == AIR;
-
-    // if (canMoveDown) {
-    //   nextGrid[x][y].type = AIR;
-    //   nextGrid[x][y - 1].type = grid[x][y].type;
-    // }
-
+  if (cellProperties.hasGravity || cellProperties.isFluid) {
     if (neighbors.bottom->isValid && neighbors.bottom->type == AIR) {
       nextCell->type = AIR;
       neighbors.bottom->type = cell->type;
-    } else if (canMoveBottomLeft) {
-      nextGrid[x][y].type = AIR;
-      nextGrid[x - 1][y - 1].type = grid[x][y].type;
-    } else if (canMoveBottomRight) {
-      nextGrid[x][y].type = AIR;
-      nextGrid[x + 1][y - 1].type = grid[x][y].type;
-    } else if (canMoveLeft) {
-      nextGrid[x][y].type = AIR;
-      nextGrid[x - 1][y].type = grid[x][y].type;
-    } else if (canMoveRight) {
-      nextGrid[x][y].type = AIR;
-      nextGrid[x + 1][y].type = grid[x][y].type;
+    } else if (neighbors.bottomLeft->isValid && neighbors.bottomLeft->type == AIR) {
+      nextCell->type = AIR;
+      neighbors.bottomLeft->type = cell->type;
+    } else if (neighbors.bottomRight->isValid && neighbors.bottomRight->type == AIR) {
+      nextCell->type = AIR;
+      neighbors.bottomRight->type = cell->type;
+    } else if (cellProperties.isFluid && neighbors.left->isValid && neighbors.left->type == AIR) {
+      nextCell->type = AIR;
+      neighbors.left->type = cell->type;
+    } else if (cellProperties.isFluid && neighbors.right->isValid && neighbors.right->type == AIR) {
+      nextCell->type = AIR;
+      neighbors.right->type = cell->type;
     }
   }
 
@@ -304,13 +291,13 @@ void performCellUpdates(int x, int y) {
         }
       }
     } else if (grid[x][y].age > 25) {
-      nextGrid[x][y].type = AIR;
-      nextGrid[x][y].hueOffset = 0.0f;
+      nextCell->type = AIR;
+      nextCell->hueOffset = 0.0f;
     }
   }
 
   // Incrememnt age for every cell
-  nextGrid[x][y].age = nextGrid[x][y].age + 1;
+  nextCell->age = nextCell->age + 1;
 }
 
 /* ---------------------------------------- Helper Functions ---------------------------------------- */
